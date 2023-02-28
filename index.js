@@ -1,5 +1,5 @@
 /* Required Modules */
-const { entersState, joinVoiceChannel, VoiceConnectionStatus, EndBehaviorType } = require('@discordjs/voice');
+const { entersState, joinVoiceChannel, VoiceConnectionStatus, EndBehaviorType, VoiceReceiver } = require('@discordjs/voice');
 const { createWriteStream } = require('node:fs');
 const prism = require('prism-media');
 const { pipeline } = require('node:stream');
@@ -9,6 +9,7 @@ const sleep = require('util').promisify(setTimeout);
 const fs = require('fs');
 const AudioMixer = require('audio-mixer');
 const NanoTimer = require('nanotimer'); // node
+const Readable = require('stream');
 
 /* Initialize Discord Client */
 const client = new Client({
@@ -38,6 +39,8 @@ client.voiceManager = new Collection()
 client.on("ready", () => {
     console.log("Connected as", client.user.tag, "to discord!");
 })
+
+var recording = false
 
 /* When message is sent*/
 client.on('messageCreate', async (message) => {
@@ -77,15 +80,19 @@ client.on('messageCreate', async (message) => {
             console.log(voiceChannelMemberIds);
 
 
+            recording = true;
+
+
             /* When user speaks in vc*/
             // receiver.speaking.on('start', (userId) => {
             //     if(userId !== message.author.id) return;
             //     /* create live stream to save audio */
             //     createListeningStream(receiver, userId, client.users.cache.get(userId));
             // });
-            for (const userId of voiceChannelMemberIds) {
-                createListeningStream(receiver, userId, client.users.cache.get(userId));
-            }
+
+            // for (const userId of voiceChannelMemberIds) {
+                await createListeningStream(receiver, message.author.id);
+            // }
 
             /* Return success message */
             return message.channel.send(`🎙️ I am now recording ${voiceChannel.name}`);
@@ -94,8 +101,10 @@ client.on('messageCreate', async (message) => {
         } else if (connection) {
             /* Send waiting message */
             const msg = await message.channel.send("Please wait while I am preparing your recording...")
-            /* wait for 5 seconds */
-            await sleep(5000)
+            /* wait for 10 seconds */
+            await sleep(10000)
+            console.log('buffer.length');
+            console.log(buffer.length);
 
             /* disconnect the bot from voice channel */
             connection.destroy();
@@ -104,6 +113,7 @@ client.on('messageCreate', async (message) => {
             client.voiceManager.delete(message.channel.guild.id)
             
             const filename = `./recordings/${message.author.id}`;
+            recording = false;
 
             /* Create ffmpeg command to convert pcm to mp3 */
             const process = new ffmpeg(`${filename}.pcm`);
@@ -123,28 +133,25 @@ client.on('messageCreate', async (message) => {
                 /* handle error by sending error message to discord */
                 return msg.edit(`❌ An error occurred while processing your recording: ${err.message}`);
             });
-
         }
     }
 })
 
-
-client.login("TOKEN")
-
-
+client.login("")
+// ffmpeg -f s16le -ar 48k -ac 2 -i 233891719832272896.pcm file.wav
 
 //------------------------- F U N C T I O N S ----------------------//
-
-
 const SILENCE = Buffer.from([0xf8, 0xff, 0xfe]);
+let buffer = [];
 
 /* Function to write audio to file (from discord.js example) */
-function createListeningStream(connection, userId) {
-    
-    let buffer = [];
-    
+async function createListeningStream(receiver, userId) {
+    // Accumulates very, very slowly, but only when user is speaking: reduces buffer size otherwise
+
+    // Interpolating silence into user audio stream
     let userStream = new Readable({
         read() {
+            console.log('read');
             if (recording) {
                 // Pushing audio at the same rate of the receiver
                 // (Could probably be replaced with standard, less precise timer)
@@ -169,46 +176,41 @@ function createListeningStream(connection, userId) {
             }
         }
     });
-     
+    
     // Redirecting user audio to userStream to have silence interpolated
-    let receiverStream = connection.receiver.subscribe(userId, {
+    let receiverStream = receiver.subscribe(userId, {
         end: {
             behavior: EndBehaviorType.Manual, // Manually closed elsewhere
         },
         // mode: 'pcm',
     });
-    receiverStream.on('data', chunk => buffer.push(chunk));
+    receiverStream.on('data', (chunk) => {
+        buffer.push(chunk);
+        console.log(buffer.length);
+    });
+
+    const oggStream = new prism.opus.OggLogicalBitstream({
+		opusHead: new prism.opus.OpusHead({
+			channelCount: 2,
+			sampleRate: 48000,
+		}),
+		pageSizeControl: {
+			maxPackets: 10,
+		},
+	});
+
+    const filename = `./recordings/${userId}.pcm`;
+
+    const out = createWriteStream(filename, { flags: 'a' });
+    console.log(`👂 Started recording ${filename}`);
+
+    userStream.pipe(oggStream).pipe(out);
+
+	// pipeline(userStream, oggStream, out, (err) => {
+	// 	if (err) {
+	// 		console.warn(`❌ Error recording file ${filename} - ${err.message}`);
+	// 	} else {
+	// 		console.log(`✅ Recorded ${filename}`);
+	// 	}
+	// });
 }
-
-// function createListeningStream(receiver, userId, user) {
-//     const opusStream = receiver.subscribe(userId, {
-//         end: {
-//             behavior: EndBehaviorType.AfterSilence,
-//             duration: 100,
-//         },
-//     });
-    
-
-//     const oggStream = new prism.opus.OggLogicalBitstream({
-//         opusHead: new prism.opus.OpusHead({
-//             channelCount: 2,
-//             sampleRate: 48000,
-//         }),
-//         pageSizeControl: {
-//             maxPackets: 10,
-//         },
-//     });
-
-//     const filename = `./recordings/${user.id}.pcm`;
-
-//     const out = createWriteStream(filename, { flags: 'a' });
-//     console.log(`👂 Started recording ${filename}`);
-
-//     pipeline(opusStream, oggStream, out, (err) => {
-//         if (err) {
-//             console.warn(`❌ Error recording file ${filename} - ${err.message}`);
-//         } else {
-//             console.log(`✅ Recorded ${filename}`);
-//         }
-//     });
-// }
