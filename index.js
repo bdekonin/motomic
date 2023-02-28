@@ -140,33 +140,44 @@ const SILENCE = Buffer.from([0xf8, 0xff, 0xfe]);
 
 /* Function to write audio to file (from discord.js example) */
 function createListeningStream(connection, userId) {
-    const userStream = connection.subscribe(userId, {
+    
+    let buffer = [];
+    
+    let userStream = new Readable({
+        read() {
+            if (recording) {
+                // Pushing audio at the same rate of the receiver
+                // (Could probably be replaced with standard, less precise timer)
+                let delay = new NanoTimer();
+                delay.setTimeout(() => {
+                    if (buffer.length > 0) {
+                        this.push(buffer.shift());
+                    }
+                    else {
+                        this.push(SILENCE);
+                    }
+                    // delay.clearTimeout();
+                }, '', '20m'); // A 20.833ms period makes for a 48kHz frequency
+            }
+            else if (buffer.length > 0) {
+                // Sending buffered audio ASAP
+                this.push(buffer.shift());
+            }
+            else {
+                // Ending stream
+                this.push(null);
+            }
+        }
+    });
+     
+    // Redirecting user audio to userStream to have silence interpolated
+    let receiverStream = connection.receiver.subscribe(userId, {
         end: {
-            behavior: EndBehaviorType.Manual,
+            behavior: EndBehaviorType.Manual, // Manually closed elsewhere
         },
+        // mode: 'pcm',
     });
-
-    const input = new AudioMixer.Input({
-        channels: 2,
-        sampleRate: 48000,
-        bitDepth: 16,
-        volume: 1,
-        callback: (buffer) => {
-            // do something with the mixed audio buffer
-        },
-    });
-
-    mixer.addInput(input);
-
-    // Pipe the userStream to the audio-mixer input
-    userStream.pipe(input);
-
-    let buffer
-
-
-
-
-
+    receiverStream.on('data', chunk => buffer.push(chunk));
 }
 
 // function createListeningStream(receiver, userId, user) {
