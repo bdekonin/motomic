@@ -45,7 +45,7 @@ var recording = false
 /* When message is sent*/
 client.on('messageCreate', async (message) => {
     /* If content starts with `!record` */
-    if (message.content.startsWith('!record')) {
+    if (message.content.startsWith('!record') || message.content.startsWith('!r')) {
         /* If member do not have admin perms */
         if (!message.member.permissions.has('ADMINISTRATOR'))
             return message.channel.send('You do not have permission to use this command.'); 
@@ -81,7 +81,6 @@ client.on('messageCreate', async (message) => {
 
 
             recording = true;
-
 
             /* When user speaks in vc*/
             // receiver.speaking.on('start', (userId) => {
@@ -137,24 +136,23 @@ client.on('messageCreate', async (message) => {
     }
 })
 
-client.login("")
+client.login("TOKEN")
 // ffmpeg -f s16le -ar 48k -ac 2 -i 233891719832272896.pcm file.wav
 
 //------------------------- F U N C T I O N S ----------------------//
 const SILENCE = Buffer.from([0xf8, 0xff, 0xfe]);
-let buffer = [];
 
 /* Function to write audio to file (from discord.js example) */
 async function createListeningStream(receiver, userId) {
     // Accumulates very, very slowly, but only when user is speaking: reduces buffer size otherwise
+    let buffer = [];
 
     // Interpolating silence into user audio stream
     let userStream = new Readable({
         read() {
-            console.log('read');
             if (recording) {
                 // Pushing audio at the same rate of the receiver
-                // (Could probably be replaced with standard, less precise timer)
+                // (Could probably be replaced with standard, l ess precise timer)
                 let delay = new NanoTimer();
                 delay.setTimeout(() => {
                     if (buffer.length > 0) {
@@ -202,15 +200,12 @@ async function createListeningStream(receiver, userId) {
     const filename = `./recordings/${userId}.pcm`;
 
     const out = createWriteStream(filename, { flags: 'a' });
-    console.log(`👂 Started recording ${filename}`);
 
-    userStream.pipe(oggStream).pipe(out);
-
-	// pipeline(userStream, oggStream, out, (err) => {
-	// 	if (err) {
-	// 		console.warn(`❌ Error recording file ${filename} - ${err.message}`);
-	// 	} else {
-	// 		console.log(`✅ Recorded ${filename}`);
-	// 	}
-	// });
+	pipeline(userStream, oggStream, out, (err) => {
+		if (err) {
+			console.warn(`❌ Error recording file ${filename} - ${err.message}`);
+		} else {
+			console.log(`✅ Recorded ${filename}`);
+		}
+	});
 }
