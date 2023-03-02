@@ -9,9 +9,11 @@ const sleep = require('util').promisify(setTimeout);
 const fs = require('fs');
 const AudioMixer = require('audio-mixer');
 const NanoTimer = require('nanotimer'); // node
-const Readable = require('stream');
+const Stream = require('stream')
+const dotenv = require('dotenv');
 
 /* Initialize Discord Client */
+
 const client = new Client({
     intents: [
         Intents.FLAGS.GUILDS,
@@ -21,16 +23,10 @@ const client = new Client({
     ]
 })
 
+dotenv.config();
+const token = process.env.TOKEN;
 
-/* Audio-Mixer */
-let mixer = new AudioMixer.Mixer({
-    sampleRate: 48000,
-});
-
-let input = mixer.input({
-    channels: 1,
-    volume: 75
-});
+client.login(token)
 
 /* Collection to store voice state */
 client.voiceManager = new Collection()
@@ -82,16 +78,9 @@ client.on('messageCreate', async (message) => {
 
             recording = true;
 
-            /* When user speaks in vc*/
-            // receiver.speaking.on('start', (userId) => {
-            //     if(userId !== message.author.id) return;
-            //     /* create live stream to save audio */
-            //     createListeningStream(receiver, userId, client.users.cache.get(userId));
-            // });
-
-            // for (const userId of voiceChannelMemberIds) {
-                await createListeningStream(receiver, message.author.id);
-            // }
+            for (const userId of voiceChannelMemberIds) {
+                createListeningStream(receiver, userId);
+            }
 
             /* Return success message */
             return message.channel.send(`🎙️ I am now recording ${voiceChannel.name}`);
@@ -100,10 +89,10 @@ client.on('messageCreate', async (message) => {
         } else if (connection) {
             /* Send waiting message */
             const msg = await message.channel.send("Please wait while I am preparing your recording...")
+
+            recording = false;
             /* wait for 10 seconds */
-            await sleep(10000)
-            console.log('buffer.length');
-            console.log(buffer.length);
+            await sleep(5000)
 
             /* disconnect the bot from voice channel */
             connection.destroy();
@@ -111,52 +100,66 @@ client.on('messageCreate', async (message) => {
             /* Remove voice state from collection */
             client.voiceManager.delete(message.channel.guild.id)
             
-            const filename = `./recordings/${message.author.id}`;
-            recording = false;
+            
+            
+            const voiceChannelMemberIds = voiceChannel.members
+            .map(member => member.user.id)
+            .filter(id => id !== client.user.id);
+            
+            for (const userId of voiceChannelMemberIds) {
+                const fetchedUser = await client.users.fetch(userId)
 
-            /* Create ffmpeg command to convert pcm to mp3 */
-            const process = new ffmpeg(`${filename}.pcm`);
-            process.then(function (audio) {
-                audio.fnExtractSoundToMP3(`${filename}.mp3`, async function (error, file) {
-                    //edit message with recording as attachment
-                    await msg.edit({
-                        content: `🔉 Here is your recording!`,
-                        files: [new MessageAttachment(`./recordings/${message.author.id}.mp3`, 'recording.mp3')]
+                const filename = `./recordings/${fetchedUser.id}`;
+
+                /* Create ffmpeg command to convert pcm to mp3 */
+                const process = new ffmpeg(`${filename}.pcm`);
+                process.then(function (audio) {
+                    audio.fnExtractSoundToMP3(`${filename}.mp3`, async function (error, file) {
+                        //edit message with recording as attachment
+                        await msg.edit({
+                            content: `🔉 Here is your recording!`,
+                            files: [new MessageAttachment(`${filename}.mp3`, `${fetchedUser.username}.mp3`)]
+                        });
+                        
+                        //delete both files
+                        fs.unlinkSync(`${filename}.pcm`)
+                        fs.unlinkSync(`${filename}.mp3`)
                     });
-
-                    //delete both files
-                    fs.unlinkSync(`${filename}.pcm`)
-                    fs.unlinkSync(`${filename}.mp3`)
+                }, function (err) {
+                    /* handle error by sending error message to discord */
+                    return msg.edit(`❌ An error occurred while processing your recording: ${err.message}`);
                 });
-            }, function (err) {
-                /* handle error by sending error message to discord */
-                return msg.edit(`❌ An error occurred while processing your recording: ${err.message}`);
-            });
+            }
         }
     }
 })
 
-client.login("TOKEN")
-// ffmpeg -f s16le -ar 48k -ac 2 -i 233891719832272896.pcm file.wav
+// how to get token from env file
+
+
+
+
+// ffmpeg -f s16le -ar 48k -ac 2 -i recordinggs/233891719832272896.pcm file.wav
+
 
 //------------------------- F U N C T I O N S ----------------------//
-const SILENCE = Buffer.from([0xf8, 0xff, 0xfe]);
 
 /* Function to write audio to file (from discord.js example) */
 async function createListeningStream(receiver, userId) {
+    const SILENCE = Buffer.from([0xf8, 0xff, 0xfe]);
     // Accumulates very, very slowly, but only when user is speaking: reduces buffer size otherwise
-    let buffer = [];
-
+    var audioBuffer = new Array();
+    
     // Interpolating silence into user audio stream
-    let userStream = new Readable({
+    const userStream = new Stream.Readable({
         read() {
             if (recording) {
                 // Pushing audio at the same rate of the receiver
                 // (Could probably be replaced with standard, l ess precise timer)
                 let delay = new NanoTimer();
                 delay.setTimeout(() => {
-                    if (buffer.length > 0) {
-                        this.push(buffer.shift());
+                    if (audioBuffer.length > 0) {
+                        this.push(audioBuffer.shift());
                     }
                     else {
                         this.push(SILENCE);
@@ -164,7 +167,7 @@ async function createListeningStream(receiver, userId) {
                     // delay.clearTimeout();
                 }, '', '20m'); // A 20.833ms period makes for a 48kHz frequency
             }
-            else if (buffer.length > 0) {
+            else if (audioBuffer.length > 0) {
                 // Sending buffered audio ASAP
                 this.push(buffer.shift());
             }
@@ -174,7 +177,7 @@ async function createListeningStream(receiver, userId) {
             }
         }
     });
-    
+
     // Redirecting user audio to userStream to have silence interpolated
     let receiverStream = receiver.subscribe(userId, {
         end: {
@@ -183,8 +186,8 @@ async function createListeningStream(receiver, userId) {
         // mode: 'pcm',
     });
     receiverStream.on('data', (chunk) => {
-        buffer.push(chunk);
-        console.log(buffer.length);
+        audioBuffer.push(chunk);
+        console.log(audioBuffer.length);
     });
 
     const oggStream = new prism.opus.OggLogicalBitstream({
@@ -198,7 +201,6 @@ async function createListeningStream(receiver, userId) {
 	});
 
     const filename = `./recordings/${userId}.pcm`;
-
     const out = createWriteStream(filename, { flags: 'a' });
 
 	pipeline(userStream, oggStream, out, (err) => {
