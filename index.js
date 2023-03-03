@@ -100,8 +100,6 @@ client.on('messageCreate', async (message) => {
             /* Remove voice state from collection */
             client.voiceManager.delete(message.channel.guild.id)
             
-            
-            
             const voiceChannelMemberIds = voiceChannel.members
             .map(member => member.user.id)
             .filter(id => id !== client.user.id);
@@ -134,16 +132,7 @@ client.on('messageCreate', async (message) => {
     }
 })
 
-// how to get token from env file
-
-
-
-
-// ffmpeg -f s16le -ar 48k -ac 2 -i recordinggs/233891719832272896.pcm file.wav
-
-
 //------------------------- F U N C T I O N S ----------------------//
-
 /* Function to write audio to file (from discord.js example) */
 async function createListeningStream(receiver, userId) {
     const SILENCE = Buffer.from([0xf8, 0xff, 0xfe]);

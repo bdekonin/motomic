@@ -4,6 +4,7 @@
     "@discordjs/voice": "^0.8.0",
     "audio-mixer": "^2.1.4",
     "discord.js": "^13.0.1",
+    "dotenv": "^16.0.3",
     "ffmpeg": "^0.0.4",
     "libsodium-wrappers": "^0.7.9",
     "nanotimer": "^0.3.15",
